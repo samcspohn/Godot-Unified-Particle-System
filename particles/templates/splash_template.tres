@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="ParticleTemplate" load_steps=5 format=3 uid="uid://bjsiopaukrjwx"]
+
+[ext_resource type="Script" uid="uid://bfx3lwfhk4rtq" path="res://src/particles/particle_template.gd" id="1"]
+[ext_resource type="Texture2D" uid="uid://yh5t2uomea3d" path="res://particle.png" id="2"]
+
+[sub_resource type="Gradient" id="Gradient_splash"]
+offsets = PackedFloat32Array(0.0101266, 0.744304, 1)
+colors = PackedColorArray(0.8901961, 1, 1, 0.45490196, 0.94509804, 1, 1, 0.32156864, 0.792157, 1, 1, 0)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_splash"]
+gradient = SubResource("Gradient_splash")
+
+[resource]
+script = ExtResource("1")
+template_name = "splash"
+texture = ExtResource("2")
+color_over_life = SubResource("GradientTexture1D_splash")
+initial_velocity_max = 35.0
+spread = 7.0
+gravity = Vector3(0, -4, 0)
+damping_min = 0.9
+damping_max = 0.92
+lifetime_min = 5.0
+lifetime_max = 5.0
+scale_min = Vector2(5.0, 5.0)
+scale_max = Vector2(5.0, 5.0)
+emission_shape = 1

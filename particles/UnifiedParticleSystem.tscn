@@ -1,0 +1,31 @@
+[gd_scene load_steps=7 format=3 uid="uid://bqw8x7n4m5pqr"]
+
+[ext_resource type="Script" uid="uid://wtnv2uhgboir" path="res://src/particles/unified_particle_system.gd" id="1"]
+[ext_resource type="Shader" uid="uid://bkpds3pj62gkj" path="res://src/particles/shaders/particle_template_process.gdshader" id="2"]
+[ext_resource type="Shader" uid="uid://p524ps3abcb1" path="res://src/particles/shaders/particle_template_material.gdshader" id="2_3eyei"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_process"]
+shader = ExtResource("2")
+shader_parameter/max_templates = 16
+shader_parameter/inherit_emitter_velocity_ratio = 0.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_g4tbt"]
+render_priority = 0
+shader = ExtResource("2_3eyei")
+shader_parameter/use_alpha_scissor = false
+shader_parameter/alpha_scissor_threshold = 0.5
+
+[sub_resource type="QuadMesh" id="QuadMesh_lwrk3"]
+material = SubResource("ShaderMaterial_g4tbt")
+
+[node name="UnifiedParticleSystem" type="GPUParticles3D"]
+cast_shadow = 0
+amount = 1000000
+lifetime = 0.01
+fixed_fps = 60
+interpolate = false
+visibility_aabb = AABB(-100000, -100000, -100000, 200000, 200000, 200000)
+draw_order = 3
+process_material = SubResource("ShaderMaterial_process")
+draw_pass_1 = SubResource("QuadMesh_lwrk3")
+script = ExtResource("1")

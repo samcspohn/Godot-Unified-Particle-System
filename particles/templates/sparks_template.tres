@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="ParticleTemplate" load_steps=5 format=3 uid="uid://debsjyu8b8beq"]
+
+[ext_resource type="Script" uid="uid://bfx3lwfhk4rtq" path="res://src/particles/particle_template.gd" id="1"]
+[ext_resource type="Texture2D" uid="uid://yh5t2uomea3d" path="res://particle.png" id="2"]
+
+[sub_resource type="Gradient" id="Gradient_sparks"]
+offsets = PackedFloat32Array(0, 0.7959866, 1)
+colors = PackedColorArray(1, 0.93333334, 0.65882355, 1, 1, 0.93766665, 0.65999997, 1, 1, 1, 1, 0)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_sparks"]
+gradient = SubResource("Gradient_sparks")
+
+[resource]
+script = ExtResource("1")
+template_name = "sparks"
+texture = ExtResource("2")
+color_over_life = SubResource("GradientTexture1D_sparks")
+emission_energy = 64.0
+initial_velocity_min = 15.0
+initial_velocity_max = 30.0
+direction = Vector3(0, 0, 1)
+spread = 180.0
+gravity = Vector3(0, -20, 0)
+lifetime_min = 0.7
+lifetime_max = 0.7
+scale_min = Vector2(0.6, 0.6)
+scale_max = Vector2(0.8, 0.8)
+emission_shape = 1
+emission_sphere_radius = 0.5
+hue_variation_min = -0.1
+hue_variation_max = 0.1

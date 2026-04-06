@@ -1,0 +1,71 @@
+# ============================================================================
+# Godot GDExtension Project .gitignore
+# ============================================================================
+
+# ---------- C/C++ Build Artifacts ----------
+*.o
+*.obj
+*.os
+*.so
+*.dylib
+*.dll
+*.pdb
+*.lib
+*.exp
+*.a
+*.lo
+*.la
+*.out
+
+# ---------- SCons ----------
+.sconsign.dblite
+.sconsign*.dblite
+*.pyc
+__pycache__/
+.sconf_temp/
+config.log
+
+# ---------- CMake (if used alternatively) ----------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+
+# ---------- Build Output ----------
+bin/*
+!bin/.gitkeep
+build/
+
+# ---------- Godot Import Cache ----------
+.godot/
+
+# ---------- IDE / Editor Files ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+*.iml
+.project
+.cproject
+.settings/
+
+# ---------- OS Generated Files ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- Misc ----------
+*.log
+*.bak
+*.tmp
+*.temp
