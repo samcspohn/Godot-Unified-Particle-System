@@ -17,7 +17,7 @@ class_name ParticleTemplate
 @export var velocity_over_life: CurveXYZTexture
 @export var initial_velocity_min: float = 1.0
 @export var initial_velocity_max: float = 5.0
-@export var direction: Vector3 = Vector3.UP
+@export var direction: Vector3 = Vector3.FORWARD
 @export var spread: float = 45.0
 @export var gravity: Vector3 = Vector3(0, -9.8, 0)
 

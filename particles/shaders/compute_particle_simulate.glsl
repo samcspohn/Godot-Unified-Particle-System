@@ -178,7 +178,7 @@ void emit_particle_at_slot(uint particle_idx, vec3 position, vec3 direction, int
     float size_multiplier, float speed_scale, uint seed, vec3 velocity_boost) {
     // Fetch template properties
     vec4 props0 = get_template_property(template_id, 0); // velocity, lifetime
-    vec4 props2 = get_template_property(template_id, 2); // direction, spread
+    vec4 props2 = get_template_property(template_id, 2); // spread (w only; xyz direction unused—always passed in)
     vec4 props3 = get_template_property(template_id, 3); // gravity, emission_shape
     vec4 props5 = get_template_property(template_id, 5); // emission sphere/box
     vec4 props6 = get_template_property(template_id, 6); // angular velocity, initial angle
@@ -210,7 +210,23 @@ void emit_particle_at_slot(uint particle_idx, vec3 position, vec3 direction, int
 
     // Calculate initial velocity
     float initial_speed = mix(initial_vel_min, initial_vel_max, rand_from_seed(seed));
-    vec3 emission_direction = length(direction) > 0.0 ? normalize(direction) : props2.xyz;
+    // Build orthonormal basis from emitter direction (forward = -Z convention)
+    // props2.xyz is a local-space velocity: (0,0,-1) = forward along direction, (0,1,0) = up relative to direction
+    vec3 emission_direction;
+    if (length(direction) > 0.0) {
+        vec3 fwd = normalize(direction);
+        // Choose an up hint that isn't parallel to fwd
+        vec3 up_hint = abs(dot(fwd, vec3(0.0, 1.0, 0.0))) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        vec3 right = normalize(cross(up_hint, fwd));
+        vec3 up = cross(fwd, right);
+        // Transform props2.xyz from local space to world space
+        // Local convention: -Z = forward (matches direction), +Y = up, +X = right
+        vec3 local_vel = props2.xyz;
+        emission_direction = right * local_vel.x + up * local_vel.y + fwd * (-local_vel.z);
+        emission_direction = length(emission_direction) > 0.0 ? normalize(emission_direction) : fwd;
+    } else {
+        emission_direction = length(props2.xyz) > 0.0 ? normalize(props2.xyz) : vec3(0.0, 0.0, -1.0);
+    }
     vec3 vel_dir = get_random_direction_from_spread(seed, emission_direction, spread);
     vec3 velocity = vel_dir * initial_speed + velocity_boost;
 
@@ -312,7 +328,7 @@ void emit_from_emitter(uint emitter_idx) {
 
     // Emit particles along the path, starting from trail_pos
     // Same as old CPU code: emit at trail_pos, trail_pos + step, trail_pos + 2*step, etc.
-    for (int i = 0; i < particle_count; i++) {
+    for (int i = 1; i <= particle_count; i++) {
         // Calculate position along the path from trail_pos
         vec3 emit_pos = trail_pos + travel_dir * (float(i) * step_size);
 
