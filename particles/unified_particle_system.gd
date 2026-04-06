@@ -5,6 +5,11 @@ class_name UParticleSystem
 ## Uses compute shader-based ComputeParticleSystem for GPU-accelerated simulation
 ## Templates are registered lazily on first use - no separate init system needed
 
+static var _instance: UParticleSystem
+
+static func get_instance() -> UParticleSystem:
+	return _instance
+
 var template_manager: ParticleTemplateManager
 var _compute_system: ComputeParticleSystem
 var _initialized: bool = false
@@ -14,7 +19,8 @@ func _ready() -> void:
 		queue_free()
 		return
 
-	# Create template manager internally (skip if already lazily created)
+	_instance = self
+
 	if template_manager == null:
 		template_manager = ParticleTemplateManager.new()
 		template_manager.name = "ParticleTemplateManager"

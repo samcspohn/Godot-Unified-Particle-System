@@ -19,8 +19,6 @@ class_name TrailEmitter
 @export var auto_update_position: bool = true
 
 var _emitter_id: int = -1
-var _unified_system: UParticleSystem = null
-var _template_id: int = -1
 var _is_active: bool = false
 var _initialized: bool = false
 
@@ -35,8 +33,8 @@ func _ready() -> void:
 	_wait_for_particle_system()
 
 func _process(_delta: float) -> void:
-	if auto_update_position and _is_active and _emitter_id >= 0 and _unified_system != null:
-		_unified_system.update_emitter_position(_emitter_id, global_position)
+	if auto_update_position and _is_active and _emitter_id >= 0:
+		ParticleTemplate.update_emitter_position(_emitter_id, global_position)
 
 func _exit_tree() -> void:
 	stop_emitting()
@@ -68,21 +66,14 @@ func _on_init_timer_timeout() -> void:
 		initialization_failed.emit(reason)
 
 func _try_initialize() -> bool:
-	# Find UnifiedParticleSystem autoload
-	if not has_node("/root/UnifiedParticleSystem"):
+	if UParticleSystem.get_instance() == null:
 		return false
-	_unified_system = get_node("/root/UnifiedParticleSystem") as UParticleSystem
-	if _unified_system == null:
-		return false
-
-	# Ensure template is set
 	if template == null:
 		push_warning("TrailEmitter: No template assigned to '%s'" % name)
 		return false
 
-	# Register template lazily
-	_template_id = _unified_system.ensure_template_registered(template)
-	if _template_id < 0:
+	# Lazy register template
+	if template.ensure_registered() < 0:
 		return false
 
 	_initialized = true
@@ -99,14 +90,12 @@ func start_emitting() -> void:
 	if not _initialized:
 		push_warning("TrailEmitter: Cannot start - not initialized yet")
 		return
-	if _unified_system == null or _template_id < 0:
-		push_warning("TrailEmitter: Cannot start - system or template not available")
+	if template == null:
+		push_warning("TrailEmitter: Cannot start - no template assigned")
 		return
 	if _emitter_id >= 0:
 		return
-	_emitter_id = _unified_system.allocate_emitter(
-		_template_id, global_position, size_multiplier, emit_rate, speed_scale, velocity_boost
-	)
+	_emitter_id = template.allocate_emitter(global_position, size_multiplier, emit_rate, speed_scale, velocity_boost)
 	if _emitter_id >= 0:
 		_is_active = true
 		emitter_started.emit()
@@ -114,8 +103,8 @@ func start_emitting() -> void:
 		push_warning("TrailEmitter: Failed to allocate emitter (pool may be full)")
 
 func stop_emitting() -> void:
-	if _emitter_id >= 0 and _unified_system != null:
-		_unified_system.free_emitter(_emitter_id)
+	if _emitter_id >= 0:
+		ParticleTemplate.free_emitter(_emitter_id)
 		emitter_stopped.emit()
 	_emitter_id = -1
 	_is_active = false
@@ -130,7 +119,9 @@ func get_emitter_id() -> int:
 	return _emitter_id
 
 func get_template_id() -> int:
-	return _template_id
+	if template:
+		return template.template_id
+	return -1
 
 
 # ============================================================================
@@ -142,17 +133,13 @@ func set_template(new_template: ParticleTemplate) -> bool:
 	if new_template == null:
 		push_warning("TrailEmitter: Cannot set null template")
 		return false
-	if _unified_system == null:
-		template = new_template
-		return false
 
 	var was_active = _is_active
 	if was_active:
 		stop_emitting()
 
 	template = new_template
-	_template_id = _unified_system.ensure_template_registered(template)
-	if _template_id < 0:
+	if template.ensure_registered() < 0:
 		push_warning("TrailEmitter: Failed to register new template")
 		return false
 
@@ -162,18 +149,18 @@ func set_template(new_template: ParticleTemplate) -> bool:
 
 func set_size(new_size: float) -> void:
 	size_multiplier = new_size
-	if _emitter_id >= 0 and _unified_system != null:
-		_unified_system.set_emitter_params(_emitter_id, size_multiplier, -1.0, -1.0)
+	if _emitter_id >= 0:
+		ParticleTemplate.set_emitter_params(_emitter_id, size_multiplier, -1.0, -1.0)
 
 func set_emit_rate(new_rate: float) -> void:
 	emit_rate = new_rate
-	if _emitter_id >= 0 and _unified_system != null:
-		_unified_system.set_emitter_params(_emitter_id, -1.0, emit_rate, -1.0)
+	if _emitter_id >= 0:
+		ParticleTemplate.set_emitter_params(_emitter_id, -1.0, emit_rate, -1.0)
 
 func set_velocity_boost(new_boost: float) -> void:
 	velocity_boost = new_boost
-	if _emitter_id >= 0 and _unified_system != null:
-		_unified_system.set_emitter_params(_emitter_id, -1.0, -1.0, velocity_boost)
+	if _emitter_id >= 0:
+		ParticleTemplate.set_emitter_params(_emitter_id, -1.0, -1.0, velocity_boost)
 
 func set_speed_scale(new_speed_scale: float) -> void:
 	speed_scale = new_speed_scale
@@ -185,8 +172,8 @@ func set_all_params(new_size: float, new_emit_rate: float, new_velocity_boost: f
 	size_multiplier = new_size
 	emit_rate = new_emit_rate
 	velocity_boost = new_velocity_boost
-	if _emitter_id >= 0 and _unified_system != null:
-		_unified_system.set_emitter_params(_emitter_id, size_multiplier, emit_rate, velocity_boost)
+	if _emitter_id >= 0:
+		ParticleTemplate.set_emitter_params(_emitter_id, size_multiplier, emit_rate, velocity_boost)
 
 
 # ============================================================================
@@ -194,5 +181,5 @@ func set_all_params(new_size: float, new_emit_rate: float, new_velocity_boost: f
 # ============================================================================
 
 func update_position(pos: Vector3) -> void:
-	if _emitter_id >= 0 and _unified_system != null:
-		_unified_system.update_emitter_position(_emitter_id, pos)
+	if _emitter_id >= 0:
+		ParticleTemplate.update_emitter_position(_emitter_id, pos)

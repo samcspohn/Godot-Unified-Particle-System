@@ -121,3 +121,56 @@ func get_random_angular_velocity() -> float:
 
 func get_random_initial_angle() -> float:
 	return randf_range(initial_angle_min, initial_angle_max)
+
+# ── Ergonomic convenience API ──────────────────────────────────────────────────
+
+## Ensure this template is registered with the particle system.
+## Returns the template_id, or -1 if the system is not available.
+func ensure_registered() -> int:
+	if template_id >= 0:
+		return template_id
+	var system := UParticleSystem.get_instance()
+	if system == null:
+		push_error("ParticleTemplate: No UnifiedParticleSystem instance available. Make sure it is added as an autoload.")
+		return -1
+	return system.ensure_template_registered(self)
+
+## Emit a burst of particles using this template.
+## Lazily registers the template on first use.
+func emit(pos: Vector3, direction: Vector3, size_multiplier: float = 1.0, count: int = 1, speed_mod: float = 1.0) -> void:
+	var system := UParticleSystem.get_instance()
+	if system == null:
+		push_error("ParticleTemplate: No UnifiedParticleSystem instance available.")
+		return
+	system.emit_from_template(self, pos, direction, size_multiplier, count, speed_mod)
+
+## Allocate a GPU emitter for continuous emission (trails, wakes, smoke).
+## Lazily registers the template on first use.
+## Returns the emitter_id, or -1 on failure.
+func allocate_emitter(position: Vector3, size_multiplier: float = 1.0, emit_rate: float = 0.05, speed_scale: float = 1.0, velocity_boost: float = 0.0) -> int:
+	var system := UParticleSystem.get_instance()
+	if system == null:
+		push_error("ParticleTemplate: No UnifiedParticleSystem instance available.")
+		return -1
+	return system.allocate_emitter_from_template(self, position, size_multiplier, emit_rate, speed_scale, velocity_boost)
+
+## Free a GPU emitter previously allocated by this template.
+static func free_emitter(emitter_id: int) -> void:
+	var system := UParticleSystem.get_instance()
+	if system == null:
+		return
+	system.free_emitter(emitter_id)
+
+## Update the position of a GPU emitter.
+static func update_emitter_position(emitter_id: int, pos: Vector3) -> void:
+	var system := UParticleSystem.get_instance()
+	if system == null:
+		return
+	system.update_emitter_position(emitter_id, pos)
+
+## Update parameters on a GPU emitter.
+static func set_emitter_params(emitter_id: int, size_multiplier: float = -1.0, emit_rate: float = -1.0, velocity_boost: float = -1.0) -> void:
+	var system := UParticleSystem.get_instance()
+	if system == null:
+		return
+	system.set_emitter_params(emitter_id, size_multiplier, emit_rate, velocity_boost)

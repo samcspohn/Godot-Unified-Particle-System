@@ -3,7 +3,7 @@ class_name ParticleEmitter
 
 ## Lightweight particle emitter that spawns particles in the UnifiedParticleSystem
 ## Does not render particles itself - only provides spawn position and configuration
-## Templates are registered lazily on first use via resource references
+## Templates register themselves lazily on first use
 
 @export var template: ParticleTemplate
 @export_group("Emission")
@@ -19,7 +19,6 @@ class_name ParticleEmitter
 @export var size_multiplier: float = 1.0
 @export var size_variation: float = 0.0
 
-var _unified_system: UParticleSystem
 var _time_accumulator: float = 0.0
 var _has_emitted: bool = false
 var _previous_position: Vector3
@@ -27,23 +26,14 @@ var _velocity: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	_previous_position = global_position
-	_unified_system = _find_unified_particle_system()
-	if _unified_system == null:
-		push_error("ParticleEmitter: Could not find UnifiedParticleSystem")
-		return
 	if template == null:
 		push_warning("ParticleEmitter: No template assigned to '%s'" % name)
 		return
-
-	# Ensure template is registered lazily
-	_unified_system.ensure_template_registered(template)
-
-	if auto_emit:
-		if one_shot:
-			emit_particles()
+	if auto_emit and one_shot:
+		emit_particles()
 
 func _process(delta: float) -> void:
-	if template == null or _unified_system == null:
+	if template == null:
 		return
 	if inherit_velocity:
 		_velocity = (global_position - _previous_position) / delta
@@ -58,19 +48,9 @@ func _process(delta: float) -> void:
 		_has_emitted = true
 
 func emit_particles(count: int = -1, custom_direction: Vector3 = Vector3.ZERO, custom_size: float = -1.0) -> void:
-	if _unified_system == null:
-		push_error("ParticleEmitter: No unified particle system available")
-		return
 	if template == null:
 		push_error("ParticleEmitter: No template assigned")
 		return
-
-	# Ensure template is registered (lazy registration)
-	if template.template_id < 0:
-		_unified_system.ensure_template_registered(template)
-		if template.template_id < 0:
-			push_error("ParticleEmitter: Failed to register template '%s'" % template.resource_path)
-			return
 
 	var emit_count = count if count > 0 else emission_count
 	var final_direction = base_direction + custom_direction
@@ -84,9 +64,7 @@ func emit_particles(count: int = -1, custom_direction: Vector3 = Vector3.ZERO, c
 		if custom_size < 0.0 and size_variation > 0.0:
 			particle_size += randf_range(-size_variation, size_variation)
 		particle_size = clampf(particle_size, 0.0, 1.0)
-		_unified_system.emit_particles(
-			global_position, final_direction, template.template_id, particle_size, 1, 1.0
-		)
+		template.emit(global_position, final_direction, particle_size, 1, 1.0)
 
 func emit_burst(count: int, direction: Vector3 = Vector3.ZERO, size: float = -1.0) -> void:
 	emit_particles(count, direction, size)
@@ -99,15 +77,3 @@ func restart_emission() -> void:
 	_has_emitted = false
 	_time_accumulator = 0.0
 	auto_emit = true
-
-func _find_unified_particle_system() -> UParticleSystem:
-	# Check autoload first
-	if has_node("/root/UnifiedParticleSystem"):
-		return get_node("/root/UnifiedParticleSystem") as UParticleSystem
-	# Fallback: search scene tree
-	var root = get_tree().root
-	for child in root.get_children():
-		if child is UParticleSystem:
-			return child
-	push_warning("ParticleEmitter: UnifiedParticleSystem not found in scene.")
-	return null
