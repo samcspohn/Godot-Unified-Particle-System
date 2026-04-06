@@ -80,13 +80,13 @@ ComputeParticleSystem::~ComputeParticleSystem() {
 }
 
 void ComputeParticleSystem::_ready() {
-	// PackedStringArray cmdline_args = OS::get_singleton()->get_cmdline_args();
-	// for (int i = 0; i < cmdline_args.size(); i++) {
-	// 	if (cmdline_args[i] == "--server") {
-	// 		queue_free();
-	// 		return;
-	// 	}
-	// }
+	PackedStringArray cmdline_args = OS::get_singleton()->get_cmdline_args();
+	for (int i = 0; i < cmdline_args.size(); i++) {
+		if (cmdline_args[i] == "--server") {
+			queue_free();
+			return;
+		}
+	}
 	UtilityFunctions::print("ComputeParticleSystem: ready");
 	// Defer initialization to ensure template manager is ready
 	call_deferred("_initialize");
@@ -227,7 +227,7 @@ bool ComputeParticleSystem::_setup_particle_textures() {
 bool ComputeParticleSystem::_setup_compute_shader() {
 	// Load compute shader
 	Ref<RDShaderFile> shader_file = ResourceLoader::get_singleton()->load(
-		"res://addons/unified_particle_system/particles/shaders/compute_particle_simulate.glsl");
+		"res://addons/Godot-Unified-Particle-System/particles/shaders/compute_particle_simulate.glsl");
 	if (!shader_file.is_valid()) {
 		UtilityFunctions::push_error("ComputeParticleSystem: Failed to load compute shader file");
 		return false;
@@ -370,7 +370,7 @@ bool ComputeParticleSystem::_setup_emitter_buffer() {
 bool ComputeParticleSystem::_setup_sort_shader() {
 	// Load sort compute shader
 	Ref<RDShaderFile> shader_file = ResourceLoader::get_singleton()->load(
-		"res://addons/unified_particle_system/particles/shaders/compute_particle_sort.glsl");
+		"res://addons/Godot-Unified-Particle-System/particles/shaders/compute_particle_sort.glsl");
 	if (!shader_file.is_valid()) {
 		UtilityFunctions::push_error("ComputeParticleSystem: Failed to load sort shader file");
 		return false;
@@ -807,7 +807,7 @@ bool ComputeParticleSystem::_setup_rendering() {
 
 	// Load render shader
 	Ref<Shader> render_shader = ResourceLoader::get_singleton()->load(
-		"res://addons/unified_particle_system/particles/shaders/compute_particle_render.gdshader");
+		"res://addons/Godot-Unified-Particle-System/particles/shaders/compute_particle_render.gdshader");
 	if (!render_shader.is_valid()) {
 		UtilityFunctions::push_error("ComputeParticleSystem: Failed to load render shader");
 		return false;
@@ -1435,55 +1435,45 @@ void ComputeParticleSystem::_run_particle_sort() {
 	push_constants[10] = 0.0f;
 	push_constants[11] = 0.0f;
 
+	// Use a single compute list with barriers instead of 14 separate submissions
+	// This significantly reduces GPU sync overhead
 	int64_t compute_list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(compute_list, sort_pipeline);
 	rd->compute_list_bind_uniform_set(compute_list, sort_uniform_set, 0);
+
+	// MODE 0: Compute depth keys and initialize indices
 	rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
 	rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
-	rd->compute_list_end();
+	rd->compute_list_add_barrier(compute_list);  // Barrier instead of end
 
 	// Run 4 radix sort passes (8 bits each = 32 bits total)
 	for (int pass_num = 0; pass_num < 4; pass_num++) {
 		// MODE 1: Build histogram
 		push_constants.set(7, (float)pass_num);  // pass_number
 		push_constants.set(8, 1.0f);  // mode = histogram
-
-		compute_list = rd->compute_list_begin();
-		rd->compute_list_bind_compute_pipeline(compute_list, sort_pipeline);
-		rd->compute_list_bind_uniform_set(compute_list, sort_uniform_set, 0);
 		rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
 		rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
-		rd->compute_list_end();
+		rd->compute_list_add_barrier(compute_list);
 
 		// MODE 2: Compute prefix sum
 		push_constants.set(8, 2.0f);  // mode = scan
-
-		compute_list = rd->compute_list_begin();
-		rd->compute_list_bind_compute_pipeline(compute_list, sort_pipeline);
-		rd->compute_list_bind_uniform_set(compute_list, sort_uniform_set, 0);
 		rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
 		rd->compute_list_dispatch(compute_list, 1, 1, 1);  // Single workgroup for scan
-		rd->compute_list_end();
+		rd->compute_list_add_barrier(compute_list);
 
 		// MODE 3: Scatter to sorted positions
 		push_constants.set(8, 3.0f);  // mode = scatter
-
-		compute_list = rd->compute_list_begin();
-		rd->compute_list_bind_compute_pipeline(compute_list, sort_pipeline);
-		rd->compute_list_bind_uniform_set(compute_list, sort_uniform_set, 0);
 		rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
 		rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
-		rd->compute_list_end();
+		rd->compute_list_add_barrier(compute_list);
 	}
 
 	// MODE 4: Write sorted indices to texture
 	push_constants.set(8, 4.0f);  // mode = write_texture
-
-	compute_list = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(compute_list, sort_pipeline);
-	rd->compute_list_bind_uniform_set(compute_list, sort_uniform_set, 0);
 	rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
 	rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
+
+	// Single submission for all sort operations
 	rd->compute_list_end();
 }
 

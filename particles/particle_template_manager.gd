@@ -8,7 +8,6 @@ const MAX_TEMPLATES = 16
 
 # Template registry
 var templates: Array[ParticleTemplate] = []
-var template_by_name: Dictionary = {}
 var next_template_id: int = 0
 
 # Encoded texture data
@@ -21,7 +20,7 @@ var texture_array: Texture2DArray
 
 # Texture dimensions
 const CURVE_RESOLUTION = 256
-const PROPERTIES_HEIGHT = 11  # Number of property rows per template (row 10 = base color)
+const PROPERTIES_HEIGHT = 12  # Number of property rows per template (row 10 = base color, row 11 = billboard/rotation)
 
 signal templates_updated()
 
@@ -42,15 +41,15 @@ func register_template(template: ParticleTemplate) -> int:
 	template.template_id = id
 	templates[id] = template
 
-	if template.template_name != "":
-		template_by_name[template.template_name] = template
-
 	next_template_id += 1
 
-	print("ParticleTemplateManager: Registered template '%s' with ID %d" % [template.template_name, id])
+	print("ParticleTemplateManager: Registered template with ID %d" % id)
 
 	# Encode this template into textures
 	_encode_template(template, id)
+
+	# Invalidate texture array so it rebuilds with the new template's texture
+	texture_array = null
 
 	templates_updated.emit()
 
@@ -60,16 +59,6 @@ func get_template_by_id(id: int) -> ParticleTemplate:
 	if id < 0 or id >= templates.size():
 		return null
 	return templates[id]
-
-func get_template_by_name(_name: String) -> ParticleTemplate:
-	return template_by_name.get(_name, null)
-
-func get_template_id(_name: String) -> int:
-	"""Get template ID by name. Returns -1 if not found."""
-	var template = template_by_name.get(_name, null)
-	if template:
-		return template.template_id
-	return -1
 
 func _initialize_textures() -> void:
 	# Properties texture: stores scalar properties for each template
@@ -207,6 +196,14 @@ func _encode_properties(template: ParticleTemplate, id: int) -> void:
 
 	# Row 10: base color (RGBA)
 	image.set_pixel(id, 10, template.color)
+
+	# Row 11: billboard_mode (x), fixed_rotation x/y/z (in radians)
+	image.set_pixel(id, 11, Color(
+		float(template.billboard_mode),
+		deg_to_rad(template.fixed_rotation.x),
+		deg_to_rad(template.fixed_rotation.y),
+		deg_to_rad(template.fixed_rotation.z)
+	))
 
 	template_properties_texture.update(image)
 
@@ -356,7 +353,6 @@ func get_shader_uniforms() -> Dictionary:
 func clear_templates() -> void:
 	templates.clear()
 	templates.resize(MAX_TEMPLATES)
-	template_by_name.clear()
 	next_template_id = 0
 	_initialize_textures()
 	templates_updated.emit()

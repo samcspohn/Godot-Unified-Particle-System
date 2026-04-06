@@ -33,7 +33,7 @@ class ComputeParticleSystem : public Node3D {
 
 public:
 	// Constants
-	static const int MAX_PARTICLES = 200000;
+	static const int MAX_PARTICLES = 100000;
 	static const int WORKGROUP_SIZE = 64;
 	static const int MAX_EMITTERS = 1024;
 	static const int PARTICLE_TEX_WIDTH = 1024;

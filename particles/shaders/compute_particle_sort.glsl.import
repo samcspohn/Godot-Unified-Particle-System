@@ -3,12 +3,12 @@
 importer="glsl"
 type="RDShaderFile"
 uid="uid://breanu3menb7j"
-path="res://.godot/imported/compute_particle_sort.glsl-26f828b99e82eb7e2a6863873fd5eb2c.res"
+path="res://.godot/imported/compute_particle_sort.glsl-db17c23d600c8722bae3df98aca0afa4.res"
 
 [deps]
 
-source_file="res://addons/unified_particle_system/particles/shaders/compute_particle_sort.glsl"
-dest_files=["res://.godot/imported/compute_particle_sort.glsl-26f828b99e82eb7e2a6863873fd5eb2c.res"]
+source_file="res://addons/Godot-Unified-Particle-System/particles/shaders/compute_particle_sort.glsl"
+dest_files=["res://.godot/imported/compute_particle_sort.glsl-db17c23d600c8722bae3df98aca0afa4.res"]
 
 [params]
 

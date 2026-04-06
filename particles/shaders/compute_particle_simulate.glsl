@@ -298,7 +298,7 @@ void emit_from_emitter(uint emitter_idx) {
     vec3 travel_dir = normalize(travel_vec);
 
     // Calculate number of particles to emit (same as old CPU code: int(distance / step_size))
-    int particle_count = int(distance / step_size);
+    int particle_count = min(int(distance / step_size), 100);
 
     if (particle_count <= 0) {
         return;
