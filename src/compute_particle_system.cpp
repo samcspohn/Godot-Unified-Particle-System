@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 using namespace godot;
 
@@ -70,6 +71,7 @@ ComputeParticleSystem::ComputeParticleSystem() {
 	initialized = false;
 	total_pending_particles = 0;
 	frame_random_seed = 0;
+	frame_counter = 0;
 	emission_buffer_capacity = 0;
 	emitter_lifecycle_buffer_capacity = 64;
 	active_emitter_count = 0;
@@ -880,6 +882,7 @@ void ComputeParticleSystem::_process(double delta) {
 	}
 
 	frame_random_seed = rand();
+	frame_counter++;
 
 	// Process pending batch emissions (mode 1)
 	if (pending_emissions.size() > 0) {
@@ -888,7 +891,7 @@ void ComputeParticleSystem::_process(double delta) {
 
 	// Run emitter-based emission (mode 2) - for trails
 	if (active_emitter_count > 0 || pending_emitter_inits.size() > 0 || pending_emitter_frees.size() > 0) {
-		_run_emitter_emission();
+		_run_emitter_emission(delta);
 	}
 
 	// Run simulation (mode 0)
@@ -1103,7 +1106,9 @@ void ComputeParticleSystem::_run_emitter_lifecycle() {
 		push_constants[2] = (float)free_count;
 		push_constants[3] = 4.0f;  // mode = free emitters
 		push_constants[4] = 0.0f;
-		push_constants[5] = 0.0f;
+		float frame_counter_as_float;
+		memcpy(&frame_counter_as_float, &frame_counter, sizeof(float));
+		push_constants[5] = frame_counter_as_float;
 		push_constants[6] = 0.0f;
 		push_constants[7] = 0.0f;
 
@@ -1165,7 +1170,9 @@ void ComputeParticleSystem::_run_emitter_lifecycle() {
 		push_constants[2] = (float)init_count;
 		push_constants[3] = 3.0f;  // mode = init emitters
 		push_constants[4] = 0.0f;
-		push_constants[5] = 0.0f;
+		float frame_counter_as_float;
+		memcpy(&frame_counter_as_float, &frame_counter, sizeof(float));
+		push_constants[5] = frame_counter_as_float;
 		push_constants[6] = 0.0f;
 		push_constants[7] = 0.0f;
 
@@ -1181,7 +1188,7 @@ void ComputeParticleSystem::_run_emitter_lifecycle() {
 	}
 }
 
-void ComputeParticleSystem::_run_emitter_emission() {
+void ComputeParticleSystem::_run_emitter_emission(double delta) {
 	if (active_emitter_count == 0 && pending_emitter_inits.size() == 0 && pending_emitter_frees.size() == 0) {
 		return;
 	}
@@ -1239,12 +1246,14 @@ void ComputeParticleSystem::_run_emitter_emission() {
 	// Run emitter emission compute shader (mode 2)
 	PackedFloat32Array push_constants;
 	push_constants.resize(8);
-	push_constants[0] = 0.0f;  // delta_time (unused for emission)
+	push_constants[0] = (float)delta;  // delta_time (used for time-based emission)
 	push_constants[1] = (float)MAX_PARTICLES;
 	push_constants[2] = (float)MAX_EMITTERS;  // emission_count = number of emitters
 	push_constants[3] = 2.0f;  // mode = emit from emitters
 	push_constants[4] = 0.0f;  // request_count (unused for mode 2)
-	push_constants[5] = 0.0f;
+	float frame_counter_as_float;
+	memcpy(&frame_counter_as_float, &frame_counter, sizeof(float));
+	push_constants[5] = frame_counter_as_float;
 	push_constants[6] = 0.0f;
 	push_constants[7] = 0.0f;
 
@@ -1350,7 +1359,9 @@ void ComputeParticleSystem::_process_emissions() {
 	push_constants[2] = (float)total_pending_particles;
 	push_constants[3] = 1.0f;  // mode = emit batch
 	push_constants[4] = (float)pending_emissions.size();  // request_count for binary search
-	push_constants[5] = 0.0f;
+	float frame_counter_as_float;
+	memcpy(&frame_counter_as_float, &frame_counter, sizeof(float));
+	push_constants[5] = frame_counter_as_float;
 	push_constants[6] = 0.0f;
 	push_constants[7] = 0.0f;
 
@@ -1382,7 +1393,9 @@ void ComputeParticleSystem::_run_simulation(double delta) {
 	push_constants[2] = 0.0f;  // emission_count (unused for simulation)
 	push_constants[3] = 0.0f;  // mode = simulate
 	push_constants[4] = 0.0f;  // request_count (unused for simulation)
-	push_constants[5] = 0.0f;
+	float frame_counter_as_float;
+	memcpy(&frame_counter_as_float, &frame_counter, sizeof(float));
+	push_constants[5] = frame_counter_as_float;
 	push_constants[6] = 0.0f;
 	push_constants[7] = 0.0f;
 

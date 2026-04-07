@@ -119,6 +119,7 @@ private:
 	Vector<Ref<EmissionRequest>> pending_emissions;
 	int total_pending_particles;
 	int frame_random_seed;
+	uint32_t frame_counter;
 
 protected:
 	static void _bind_methods();
@@ -161,7 +162,7 @@ public:
 	// Internal processing methods
 	bool _resize_lifecycle_buffer(int new_capacity);
 	void _run_emitter_lifecycle();
-	void _run_emitter_emission();
+	void _run_emitter_emission(double delta);
 	void _process_emissions();
 	void _run_simulation(double delta);
 	void _run_particle_sort();

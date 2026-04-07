@@ -338,7 +338,7 @@ void fragment() {
     float brightness = 1.0 + (emission_multiplier * emission_energy);
 
     // Apply brightness for HDR glow
-    vec3 final_albedo = final_color.rgb * brightness * emission_color + dir_light_color * 0.1;
+    vec3 final_albedo = final_color.rgb * brightness * emission_color + dir_light_color * 0.02;
 
     // Fade out at end of life
     float fade_start = 0.95;

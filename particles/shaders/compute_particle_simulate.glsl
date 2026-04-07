@@ -69,14 +69,17 @@ layout(push_constant, std430) uniform PushConstants {
     float emission_count; // Total particles to emit (mode 1), emitter count (mode 2), or lifecycle count (modes 3/4)
     float mode; // 0 = simulate, 1 = emit batch, 2 = emit from emitters, 3 = init emitters, 4 = free emitters
     float request_count; // Number of emission requests (for binary search bounds in mode 1)
-    float padding1;
+    float time_seed; // Frame counter passed as uintBitsToFloat for RNG seeding
     float padding2;
     float padding3;
 } params;
 
 const int MAX_TEMPLATES = 16;
 
-// Random number generation (same as particles shader)
+// Random number generation — PCG (Permuted Congruential Generator)
+// Replaces the old Park-Miller LCG which had severe low-bit correlation
+// and only 65536 distinct output values due to mod 65536 truncation.
+
 uint hash(uint x) {
     x = ((x >> uint(16)) ^ x) * uint(73244475);
     x = ((x >> uint(16)) ^ x) * uint(73244475);
@@ -84,23 +87,23 @@ uint hash(uint x) {
     return x;
 }
 
+uint pcg(inout uint state) {
+    state = state * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
 float rand_from_seed(inout uint seed) {
-    int k;
-    int s = int(seed);
-    if (s == 0) {
-        s = 305420679;
-    }
-    k = s / 127773;
-    s = 16807 * (s - k * 127773) - 2836 * k;
-    if (s < 0) {
-        s += 2147483647;
-    }
-    seed = uint(s);
-    return float(seed % uint(65536)) / 65535.0;
+    return float(pcg(seed)) / 4294967295.0;
 }
 
 float rand_from_seed_m1_p1(inout uint seed) {
     return rand_from_seed(seed) * 2.0 - 1.0;
+}
+
+// Build a seed that mixes a per-entity key with the frame counter
+uint make_seed(uint key) {
+    return hash(key ^ floatBitsToUint(params.time_seed));
 }
 
 // Fetch template property row
@@ -256,8 +259,8 @@ void emit_particle_at_slot(uint particle_idx, vec3 position, vec3 direction, int
 }
 
 void emit_particle(uint particle_idx, EmissionRequest request, uint local_idx) {
-    // Create random seed from request seed and local index
-    uint seed = hash(uint(request.params.w) + local_idx);
+    // Create random seed from request seed, local index, and frame time
+    uint seed = make_seed(uint(request.params.w) + local_idx);
 
     vec3 position = request.position_template.xyz;
     int template_id = int(request.position_template.w);
@@ -282,70 +285,93 @@ void emit_from_emitter(uint emitter_idx) {
     }
 
     vec3 current_pos = pos_template.xyz;
-    vec3 trail_pos = prev_pos_data.xyz; // Last position where we emitted (like CPU trail_pos)
     float init_flag = prev_pos_data.w; // Negative = uninitialized, skip emission
 
     // Check if emitter has been initialized (first update_emitter_position must be called)
-    // This prevents ghost trails when emitters are rapidly allocated/freed
     if (init_flag < 0.0) {
         return;
     }
 
     // params: x = emit_rate, y = speed_scale, z = size_multiplier, w = velocity_boost
-    float emit_rate = params_data.x; // particles per unit distance
+    float emit_rate = params_data.x;
     float speed_scale = params_data.y;
     float size_multiplier = params_data.z;
     float velocity_boost_strength = params_data.w;
 
-    // Calculate distance from last emission point to current position
-    vec3 travel_vec = current_pos - trail_pos;
-    float distance = length(travel_vec);
+    // Check template is_trail flag (Row 9, channel Z)
+    vec4 props9 = get_template_property(template_id, 9);
+    bool is_trail = props9.z > 0.5;
 
-    // Calculate step size (distance between particles) from emit_rate
-    // emit_rate = particles per unit, so step_size = 1/emit_rate
-    float step_size = 1.0 / max(emit_rate, 0.001);
+    // Create random seed from emitter index, position bits, and frame time
+    uint base_seed = make_seed(emitter_idx * 2654435761u +
+                hash(floatBitsToUint(current_pos.x) ^ floatBitsToUint(current_pos.z)));
 
-    // Skip if we haven't moved enough for even one particle
-    if (distance < step_size) {
-        return;
+    if (is_trail) {
+        // ── Distance-based emission (trails, wakes, ribbons) ──
+        // emit_rate = particles per unit distance
+        vec3 trail_pos = prev_pos_data.xyz;
+
+        vec3 travel_vec = current_pos - trail_pos;
+        float distance = length(travel_vec);
+        float step_size = 1.0 / max(emit_rate, 0.001);
+
+        if (distance < step_size) {
+            return;
+        }
+
+        vec3 travel_dir = normalize(travel_vec);
+        int particle_count = min(int(distance / step_size), 100);
+
+        if (particle_count <= 0) {
+            return;
+        }
+
+        vec3 velocity_boost = travel_dir * velocity_boost_strength;
+
+        for (int i = 1; i <= particle_count; i++) {
+            vec3 emit_pos = trail_pos + travel_dir * (float(i) * step_size);
+            uint particle_slot = allocate_particle_slot();
+            uint seed = hash(base_seed ^ uint(i) * 2246822519u);
+            emit_particle_at_slot(particle_slot, emit_pos, travel_dir, template_id,
+                size_multiplier, speed_scale, seed, velocity_boost);
+        }
+
+        // Advance trail_pos by the distance consumed
+        vec3 new_trail_pos = trail_pos + travel_dir * (float(particle_count) * step_size);
+        emitter_prev_pos.prev_positions[emitter_idx] = vec4(new_trail_pos, 0.0);
+    } else {
+        // ── Time-based emission (smoke, fire, ambient particles) ──
+        // emit_rate = particles per second
+        // prev_pos_data.y stores time accumulator between frames
+        float delta_time = params.delta_time;
+        float time_accum = prev_pos_data.y + delta_time;
+
+        float interval = 1.0 / max(emit_rate, 0.001);
+        int particle_count = min(int(time_accum / interval), 100);
+
+        if (particle_count <= 0) {
+            // Store updated accumulator, keep position synced
+            emitter_prev_pos.prev_positions[emitter_idx] = vec4(current_pos.x, time_accum, current_pos.z, 0.0);
+            return;
+        }
+
+        // Consume the time for emitted particles, keep fractional remainder
+        float remainder = time_accum - float(particle_count) * interval;
+
+        // Emit direction: use template direction (props2.xyz) or default up
+        vec3 emit_dir = vec3(0.0, 1.0, 0.0);
+
+        for (int i = 0; i < particle_count; i++) {
+            uint particle_slot = allocate_particle_slot();
+            uint seed = hash(base_seed ^ uint(i) * 2246822519u);
+            vec3 velocity_boost = emit_dir * velocity_boost_strength;
+            emit_particle_at_slot(particle_slot, current_pos, emit_dir, template_id,
+                size_multiplier, speed_scale, seed, velocity_boost);
+        }
+
+        // Store remainder in .y, keep position synced in .x/.z
+        emitter_prev_pos.prev_positions[emitter_idx] = vec4(current_pos.x, remainder, current_pos.z, 0.0);
     }
-
-    // Calculate travel direction
-    vec3 travel_dir = normalize(travel_vec);
-
-    // Calculate number of particles to emit (same as old CPU code: int(distance / step_size))
-    int particle_count = min(int(distance / step_size), 100);
-
-    if (particle_count <= 0) {
-        return;
-    }
-
-    // Calculate velocity boost
-    vec3 velocity_boost = travel_dir * velocity_boost_strength;
-
-    // Create random seed from emitter index and some varying data
-    uint base_seed = hash(emitter_idx + uint(current_pos.x * 1000.0) + uint(current_pos.z * 1000.0));
-
-    // Emit particles along the path, starting from trail_pos
-    // Same as old CPU code: emit at trail_pos, trail_pos + step, trail_pos + 2*step, etc.
-    for (int i = 1; i <= particle_count; i++) {
-        // Calculate position along the path from trail_pos
-        vec3 emit_pos = trail_pos + travel_dir * (float(i) * step_size);
-
-        // Allocate particle slot atomically
-        uint particle_slot = allocate_particle_slot();
-
-        // Create unique seed for this particle
-        uint seed = hash(base_seed + uint(i));
-
-        // Emit the particle with velocity boost in direction of travel
-        emit_particle_at_slot(particle_slot, emit_pos, travel_dir, template_id,
-            size_multiplier, speed_scale, seed, velocity_boost);
-    }
-
-    // Update trail_pos by the distance we consumed (same as old: trail_pos += vel * step_size * emitted)
-    vec3 new_trail_pos = trail_pos + travel_dir * (float(particle_count) * step_size);
-    emitter_prev_pos.prev_positions[emitter_idx] = vec4(new_trail_pos, 0.0);
 }
 
 void init_emitter(uint lifecycle_idx) {
@@ -412,7 +438,9 @@ void simulate_particle(uint particle_idx) {
     float angular_vel_max = props6.y;
 
     // Generate deterministic random values based on particle index
-    uint seed = hash(particle_idx);
+    // NOTE: no time mixing here — these values must be stable across the
+    // particle's lifetime so damping/accel don't jitter every frame.
+    uint seed = hash(particle_idx * 2654435761u);
     float damping = mix(damping_min, damping_max, rand_from_seed(seed));
     float linear_accel = mix(linear_accel_min, linear_accel_max, rand_from_seed(seed));
     float radial_accel = mix(radial_accel_min, radial_accel_max, rand_from_seed(seed));
