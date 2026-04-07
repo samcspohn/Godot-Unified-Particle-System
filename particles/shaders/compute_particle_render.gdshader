@@ -39,6 +39,7 @@ varying flat int v_template_id;
 varying float v_lifetime_percent;
 varying float v_size_multiplier;
 varying float v_active;
+varying float v_depth;
 
 const int MAX_TEMPLATES = 16;
 const vec3 dir_light_color = vec3(0.66, 0.66, 0.5);
@@ -291,6 +292,7 @@ void vertex() {
 
         MODELVIEW_MATRIX = VIEW_MATRIX * mat_world;
         MODELVIEW_NORMAL_MATRIX = mat3(MODELVIEW_MATRIX);
+        v_depth = -(VIEW_MATRIX * mat_world)[3].z; // for depth-based fading in fragment shader
     }
 }
 
@@ -346,6 +348,13 @@ void fragment() {
     if (v_lifetime_percent > fade_start) {
         alpha_fade = 1.0 - ((v_lifetime_percent - fade_start) / (1.0 - fade_start));
     }
+
+    // Apply depth-based fading
+    // Fade particles to transparent as they get closer to camera to prevent obscuration
+    float depth_fade_start = 300.0; // Start fading when closer than this distance
+    float depth_fade_end = 130.0;    // Fully faded when closer than this distance
+    float depth_fade = clamp((v_depth - depth_fade_start) / (depth_fade_end - depth_fade_start), 0.0, 1.0);
+    alpha_fade *= 1.0 - depth_fade + 1.0 / 256.0;
 
     ALBEDO = final_albedo;
     ALPHA = final_color.a * alpha_fade;

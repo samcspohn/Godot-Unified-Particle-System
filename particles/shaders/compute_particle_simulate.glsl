@@ -344,9 +344,18 @@ void emit_from_emitter(uint emitter_idx) {
         // emit_rate = particles per second
         // prev_pos_data.y stores time accumulator between frames
         float delta_time = params.delta_time;
-        float time_accum = prev_pos_data.y + delta_time;
-
+        float raw_accum = prev_pos_data.y;
         float interval = 1.0 / max(emit_rate, 0.001);
+
+        // Clamp stale accumulator to prevent burst on first activation.
+        // init_emitter writes position.y into this slot, which can be a
+        // large world-space coordinate. Cap to one interval so at most
+        // one particle emits on the first frame.
+        if (raw_accum > interval) {
+            raw_accum = 0.0;
+        }
+
+        float time_accum = raw_accum + delta_time;
         int particle_count = min(int(time_accum / interval), 100);
 
         if (particle_count <= 0) {
@@ -359,7 +368,7 @@ void emit_from_emitter(uint emitter_idx) {
         float remainder = time_accum - float(particle_count) * interval;
 
         // Emit direction: use template direction (props2.xyz) or default up
-        vec3 emit_dir = vec3(0.0, 1.0, 0.0);
+        vec3 emit_dir = vec3(0.0, 0.0, 0.0);
 
         for (int i = 0; i < particle_count; i++) {
             uint particle_slot = allocate_particle_slot();
