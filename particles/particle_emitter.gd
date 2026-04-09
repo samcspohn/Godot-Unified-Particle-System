@@ -4,6 +4,10 @@ class_name ParticleEmitter
 ## GPU-based particle emitter that supports both trail (distance-based) and
 ## standard (time-based) emission modes. The mode is determined automatically
 ## by the template's `is_trail` flag on the GPU side.
+##
+## Automatically responds to visibility changes in the node hierarchy.
+## When an ancestor's `visible` is set to false, the emitter stops emitting.
+## When visibility is restored, the emitter resumes if it was previously active.
 
 @export_group("Template")
 @export var template: ParticleTemplate
@@ -20,6 +24,7 @@ class_name ParticleEmitter
 
 var _emitter_id: int = -1
 var _is_active: bool = false
+var _wants_active: bool = false
 var _initialized: bool = false
 
 signal emitter_started
@@ -39,7 +44,29 @@ func _process(_delta: float) -> void:
 		ParticleTemplate.update_emitter_position(_emitter_id, global_position)
 
 func _exit_tree() -> void:
-	stop_emitting()
+	_wants_active = false
+	_stop_gpu_emitter()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED:
+		_on_visibility_changed()
+
+
+# ============================================================================
+# VISIBILITY
+# ============================================================================
+
+func _on_visibility_changed() -> void:
+	if not _initialized:
+		return
+	if is_visible_in_tree():
+		# Hierarchy became visible — resume if we wanted to be active
+		if _wants_active and not _is_active:
+			_start_gpu_emitter()
+	else:
+		# Hierarchy became hidden — suspend the GPU emitter but remember intent
+		if _is_active:
+			_stop_gpu_emitter()
 
 
 # ============================================================================
@@ -95,21 +122,20 @@ func start_emitting() -> void:
 	if template == null:
 		push_warning("ParticleEmitter: Cannot start - no template assigned")
 		return
+
+	_wants_active = true
+
+	# Only actually start the GPU emitter if we're visible in the tree
+	if not is_visible_in_tree():
+		return
 	if _is_active:
 		return
-	_emitter_id = template.allocate_emitter(global_position, size_multiplier, emit_rate, speed_scale, velocity_boost)
-	if _emitter_id >= 0:
-		_is_active = true
-		emitter_started.emit()
-	else:
-		push_warning("ParticleEmitter: Failed to allocate emitter (pool may be full)")
+
+	_start_gpu_emitter()
 
 func stop_emitting() -> void:
-	if _emitter_id >= 0:
-		ParticleTemplate.free_emitter(_emitter_id)
-		_emitter_id = -1
-	_is_active = false
-	emitter_stopped.emit()
+	_wants_active = false
+	_stop_gpu_emitter()
 
 func is_emitting() -> bool:
 	return _is_active and _emitter_id >= 0
@@ -127,6 +153,32 @@ func get_template_id() -> int:
 
 
 # ============================================================================
+# INTERNAL GPU EMITTER MANAGEMENT
+# ============================================================================
+
+func _start_gpu_emitter() -> void:
+	if _emitter_id >= 0:
+		return
+	_emitter_id = template.allocate_emitter(global_position, size_multiplier, emit_rate, speed_scale, velocity_boost)
+	if _emitter_id >= 0:
+		# # Immediately sync position so the GPU prev_pos matches the current
+		# # position. Prevents a ghost trail from the old location on restart.
+		# ParticleTemplate.update_emitter_position(_emitter_id, global_position)
+		_is_active = true
+		emitter_started.emit()
+	else:
+		push_warning("ParticleEmitter: Failed to allocate emitter (pool may be full)")
+
+func _stop_gpu_emitter() -> void:
+	if _emitter_id >= 0:
+		ParticleTemplate.free_emitter(_emitter_id)
+		_emitter_id = -1
+	if _is_active:
+		_is_active = false
+		emitter_stopped.emit()
+
+
+# ============================================================================
 # PARAMETER UPDATES
 # ============================================================================
 
@@ -136,16 +188,17 @@ func set_template(new_template: ParticleTemplate) -> bool:
 		push_warning("ParticleEmitter: Cannot set null template")
 		return false
 
-	var was_active = _is_active
-	if was_active:
-		stop_emitting()
+	var was_wanting = _wants_active
+	if _is_active:
+		_stop_gpu_emitter()
+	_wants_active = false
 
 	template = new_template
 	if template.ensure_registered() < 0:
 		push_warning("ParticleEmitter: Failed to register new template")
 		return false
 
-	if was_active:
+	if was_wanting:
 		start_emitting()
 	return true
 
@@ -167,8 +220,8 @@ func set_velocity_boost(new_boost: float) -> void:
 func set_speed_scale(new_speed_scale: float) -> void:
 	speed_scale = new_speed_scale
 	if _is_active:
-		stop_emitting()
-		start_emitting()
+		_stop_gpu_emitter()
+		_start_gpu_emitter()
 
 func set_all_params(new_size: float, new_emit_rate: float, new_velocity_boost: float) -> void:
 	size_multiplier = new_size
