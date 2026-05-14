@@ -60,6 +60,15 @@ void ComputeParticleSystem::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_extra_texture"), &ComputeParticleSystem::get_extra_texture);
 	ClassDB::bind_method(D_METHOD("get_sorted_indices_texture"), &ComputeParticleSystem::get_sorted_indices_texture);
 
+	// Playback controls
+	ClassDB::bind_method(D_METHOD("get_time_scale"), &ComputeParticleSystem::get_time_scale);
+	ClassDB::bind_method(D_METHOD("set_time_scale", "scale"), &ComputeParticleSystem::set_time_scale);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "time_scale"), "set_time_scale", "get_time_scale");
+
+	ClassDB::bind_method(D_METHOD("get_sort_camera"), &ComputeParticleSystem::get_sort_camera);
+	ClassDB::bind_method(D_METHOD("set_sort_camera", "camera"), &ComputeParticleSystem::set_sort_camera);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sort_camera", PROPERTY_HINT_NODE_TYPE, "Camera3D"), "set_sort_camera", "get_sort_camera");
+
 	// Add signal
 	ADD_SIGNAL(MethodInfo("system_ready"));
 }
@@ -75,6 +84,8 @@ ComputeParticleSystem::ComputeParticleSystem() {
 	emission_buffer_capacity = 0;
 	emitter_lifecycle_buffer_capacity = 64;
 	active_emitter_count = 0;
+	time_scale = 1.0;
+	sort_camera_id = 0;
 }
 
 ComputeParticleSystem::~ComputeParticleSystem() {
@@ -884,18 +895,27 @@ void ComputeParticleSystem::_process(double delta) {
 	frame_random_seed = rand();
 	frame_counter++;
 
+	// Apply replay-style time scaling. 0 freezes simulation but allows the
+	// sort pass to keep up with camera motion (e.g. orbiting while paused).
+	double scaled_delta = delta * time_scale;
+
 	// Process pending batch emissions (mode 1)
+	// Batch emissions are timestamped at submission and don't depend on
+	// delta; we still process them when paused so emissions queued just
+	// before pause appear immediately.
 	if (pending_emissions.size() > 0) {
 		_process_emissions();
 	}
 
-	// Run emitter-based emission (mode 2) - for trails
 	if (active_emitter_count > 0 || pending_emitter_inits.size() > 0 || pending_emitter_frees.size() > 0) {
-		_run_emitter_emission(delta);
+		// Emitter lifecycle (alloc/free/param updates) must run regardless of
+		// time_scale so the HUD can wire up emitters during a pause. The
+		// emission compute shader naturally emits zero particles when delta=0.
+		_run_emitter_emission(scaled_delta);
 	}
 
 	// Run simulation (mode 0)
-	_run_simulation(delta);
+	_run_simulation(scaled_delta);
 
 	// Run sorting pass for correct Z-order rendering
 	_run_particle_sort();
@@ -1410,18 +1430,38 @@ void ComputeParticleSystem::_run_simulation(double delta) {
 }
 
 void ComputeParticleSystem::_run_particle_sort() {
-	// Get camera position for depth calculation
-	Viewport *viewport = get_viewport();
-	if (viewport == nullptr) {
-		return;
+	// Resolve the camera used to compute particle depth keys.
+	//
+	// Priority:
+	//   1. An explicit `sort_camera` override (e.g. the replay camera, which
+	//      lives inside a SubViewport and so isn't returned by
+	//      get_viewport()->get_camera_3d() at this Node3D's location).
+	//   2. The active camera of this node's own viewport.
+	//
+	// Without (1), particles in a SubViewport-hosted scene sort against the
+	// main viewport's camera (or origin), producing visibly broken back-to-
+	// front ordering.
+	Vector3 camera_pos;
+	Camera3D *resolved_sort_camera = nullptr;
+	if (sort_camera_id != 0 && UtilityFunctions::is_instance_id_valid((int64_t)sort_camera_id)) {
+		resolved_sort_camera = Object::cast_to<Camera3D>(
+			UtilityFunctions::instance_from_id((int64_t)sort_camera_id));
 	}
+	if (resolved_sort_camera != nullptr) {
+		camera_pos = resolved_sort_camera->get_global_position();
+	} else {
+		Viewport *viewport = get_viewport();
+		if (viewport == nullptr) {
+			return;
+		}
 
-	Camera3D *camera = viewport->get_camera_3d();
-	if (camera == nullptr) {
-		return;
+		Camera3D *camera = viewport->get_camera_3d();
+		if (camera == nullptr) {
+			return;
+		}
+
+		camera_pos = camera->get_global_position();
 	}
-
-	Vector3 camera_pos = camera->get_global_position();
 
 	// Set up sort uniform set if needed
 	if (!sort_uniform_set.is_valid()) {
@@ -1702,4 +1742,29 @@ Ref<Texture2DRD> ComputeParticleSystem::get_extra_texture() const {
 
 Ref<Texture2DRD> ComputeParticleSystem::get_sorted_indices_texture() const {
 	return sorted_indices_texture;
+}
+
+// Playback controls
+double ComputeParticleSystem::get_time_scale() const {
+	return time_scale;
+}
+
+void ComputeParticleSystem::set_time_scale(double p_scale) {
+	// Clamp to non-negative to avoid running the simulation backwards (the
+	// shaders aren't designed for negative deltas; aging would invert).
+	if (p_scale < 0.0) {
+		p_scale = 0.0;
+	}
+	time_scale = p_scale;
+}
+
+Camera3D *ComputeParticleSystem::get_sort_camera() const {
+	if (sort_camera_id == 0 || !UtilityFunctions::is_instance_id_valid((int64_t)sort_camera_id)) {
+		return nullptr;
+	}
+	return Object::cast_to<Camera3D>(UtilityFunctions::instance_from_id((int64_t)sort_camera_id));
+}
+
+void ComputeParticleSystem::set_sort_camera(Camera3D *p_camera) {
+	sort_camera_id = (p_camera != nullptr) ? p_camera->get_instance_id() : 0;
 }

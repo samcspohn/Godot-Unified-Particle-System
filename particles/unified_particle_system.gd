@@ -156,3 +156,30 @@ func get_active_particle_count() -> int:
 	if _compute_system:
 		return _compute_system.get_active_particle_count()
 	return 0
+
+# ============================================================================
+# PLAYBACK CONTROLS (used by match replay)
+# ============================================================================
+
+## Multiplies the simulation delta. 0 freezes everything, 1 is real time,
+## 2 is double speed.
+func set_time_scale(scale: float) -> void:
+	if _compute_system:
+		_compute_system.time_scale = max(scale, 0.0)
+
+func get_time_scale() -> float:
+	if _compute_system:
+		return _compute_system.time_scale
+	return 1.0
+
+## Override the camera used by the back-to-front sort pass. Pass null to
+## fall back to the default behaviour (active camera of this node's viewport).
+## Required when the actual camera lives in a SubViewport
+func set_sort_camera(camera: Camera3D) -> void:
+	if _compute_system:
+		_compute_system.sort_camera = camera
+
+func get_sort_camera() -> Camera3D:
+	if _compute_system:
+		return _compute_system.sort_camera
+	return null

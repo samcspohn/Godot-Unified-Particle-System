@@ -121,6 +121,20 @@ private:
 	int frame_random_seed;
 	uint32_t frame_counter;
 
+	// Multiplies the delta passed to the simulation and emission compute
+	// shaders. 0 = freeze everything, 1 = real time, 2 = double speed.
+	double time_scale;
+
+	// Optional sort-camera override. When set and still valid, the sort pass
+	// uses this camera's world position instead of querying the active
+	// viewport camera. Required for SubViewport-hosted cameras (e.g. the
+	// replay scene), where get_viewport()->get_camera_3d() returns the wrong
+	// (or no) camera and sorting collapses to camera-at-origin.
+	//
+	// Stored as the camera's instance id (0 = unset) so we can validate the
+	// camera is still alive every frame without a dangling pointer crash.
+	uint64_t sort_camera_id;
+
 protected:
 	static void _bind_methods();
 
@@ -191,6 +205,12 @@ public:
 	Ref<Texture2DRD> get_custom_texture() const;
 	Ref<Texture2DRD> get_extra_texture() const;
 	Ref<Texture2DRD> get_sorted_indices_texture() const;
+
+	// Playback controls
+	double get_time_scale() const;
+	void set_time_scale(double p_scale);
+	Camera3D *get_sort_camera() const;
+	void set_sort_camera(Camera3D *p_camera);
 };
 
 } // namespace godot
