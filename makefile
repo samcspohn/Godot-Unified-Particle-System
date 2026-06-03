@@ -1,7 +1,7 @@
 # Makefile for GDExtension Godot-Unified-Particle-System
 # Uses scons to build for different targets
 
-.PHONY: all e d r clean help all-targets
+.PHONY: all e d r ew dw rw clean help all-targets
 .PHONY: editor-windows debug-windows release-windows
 .PHONY: editor-linux debug-linux release-linux
 .PHONY: editor-macos debug-macos release-macos
@@ -37,6 +37,16 @@ r:
 
 # Build all targets for detected OS
 all-targets: e d r
+
+# --- Windows cross-compilation short aliases (Linux -> Windows via MinGW) ---
+ew:
+	scons platform=windows target=editor optimize=speed
+
+dw:
+	scons platform=windows target=template_debug optimize=speed
+
+rw:
+	scons platform=windows target=template_release optimize=speed
 
 # --- Linux builds ---
 editor-linux:
@@ -82,6 +92,11 @@ help:
 	@echo "  d               - Build debug template"
 	@echo "  r               - Build release template"
 	@echo "  all-targets     - Build editor, debug, and release"
+	@echo ""
+	@echo "Windows cross-compile from Linux (requires mingw64-gcc-c++):"
+	@echo "  ew              - Cross-compile for Godot editor (Windows)"
+	@echo "  dw              - Cross-compile debug template (Windows)"
+	@echo "  rw              - Cross-compile release template (Windows)"
 	@echo ""
 	@echo "Linux targets:"
 	@echo "  editor-linux    - Build for Godot editor (Linux)"
