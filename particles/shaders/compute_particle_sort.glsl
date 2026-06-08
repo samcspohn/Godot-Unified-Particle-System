@@ -184,13 +184,15 @@ void main() {
             }
             barrier();
 
-            uint element_in = 0u, payload_in = 0u, binID = 0u;
+            uint element_in = 0u, payload_in = 0u, binID = 0u, bin_base = 0u;
             bool lane_alive = elementId < particle_count;
             if (lane_alive) {
                 element_in = read_from_a ? keys_a[elementId] : keys_b[elementId];
                 payload_in = read_from_a ? indices_a[elementId] : indices_b[elementId];
                 binID = (element_in >> g_shift) & (RADIX_BINS - 1u);
-                // Mark this thread's slot in its bin's bitmask.
+                // Capture write base BEFORE the barrier so the pointer advance
+                // from the last-in-bin thread cannot race with sibling reads.
+                bin_base = global_offsets[binID];
                 atomicAdd(bin_flags[binID].flags[flags_bin], flags_bit);
             }
             barrier();
@@ -205,7 +207,7 @@ void main() {
                     count += bitCount(bits);
                 }
 
-                uint dest = global_offsets[binID] + prefix;
+                uint dest = bin_base + prefix;
                 if (read_from_a) {
                     keys_b[dest] = element_in;
                     indices_b[dest] = payload_in;
