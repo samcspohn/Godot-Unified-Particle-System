@@ -33,14 +33,16 @@ class ComputeParticleSystem : public Node3D {
 
 public:
 	// Constants
-	static const int MAX_PARTICLES = 100000;
+	static const int MAX_PARTICLES = 400000;
 	static const int WORKGROUP_SIZE = 64;
-	static const int MAX_EMITTERS = 1024;
+	static const int MAX_EMITTERS = 16536; // Limited by 16-bit indices in emitter buffers
 	static const int PARTICLE_TEX_WIDTH = 1024;
 	static const int PARTICLE_TEX_HEIGHT = (MAX_PARTICLES + PARTICLE_TEX_WIDTH - 1) / PARTICLE_TEX_WIDTH;
 	static const int EMISSION_REQUEST_STRIDE = 64;  // 4 vec4s = 16 floats = 64 bytes
 	static const int EMITTER_STRIDE = 64;           // 4 vec4s = 16 floats = 64 bytes
 	static const int SORT_WORKGROUP_SIZE = 256;
+	static const int SORT_NUM_WORKGROUPS = 32;
+	static const int SORT_BLOCKS_PER_WG = (MAX_PARTICLES + SORT_NUM_WORKGROUPS * SORT_WORKGROUP_SIZE - 1) / (SORT_NUM_WORKGROUPS * SORT_WORKGROUP_SIZE);
 	static const int EMITTER_LIFECYCLE_STRIDE = 16; // 1 vec4 = 16 bytes
 
 private:
@@ -60,7 +62,6 @@ private:
 	RID sort_indices_a;
 	RID sort_indices_b;
 	RID sort_histogram;
-	RID sort_global_prefix;
 	RID sorted_indices_tex;
 	Ref<Texture2DRD> sorted_indices_texture;
 	RID sort_uniform_set;

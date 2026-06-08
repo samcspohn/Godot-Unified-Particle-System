@@ -424,9 +424,9 @@ bool ComputeParticleSystem::_setup_sort_shader() {
 		return false;
 	}
 
-	// Histogram buffer: 256 bins * num_workgroups
-	int num_workgroups = (MAX_PARTICLES + SORT_WORKGROUP_SIZE - 1) / SORT_WORKGROUP_SIZE;
-	int histogram_size = 256 * num_workgroups * 4;
+	// Histogram buffer: SORT_NUM_WORKGROUPS workgroups * 256 bins
+	// Layout: histogram[wid * 256 + bin]
+	int histogram_size = SORT_NUM_WORKGROUPS * 256 * 4;
 	PackedByteArray histogram_data;
 	histogram_data.resize(histogram_size);
 	histogram_data.fill(0);
@@ -434,17 +434,6 @@ bool ComputeParticleSystem::_setup_sort_shader() {
 
 	if (!sort_histogram.is_valid()) {
 		UtilityFunctions::push_error("ComputeParticleSystem: Failed to create sort histogram buffer");
-		return false;
-	}
-
-	// Global prefix sum buffer: 256 bins
-	PackedByteArray prefix_data;
-	prefix_data.resize(256 * 4);
-	prefix_data.fill(0);
-	sort_global_prefix = rd->storage_buffer_create(256 * 4, prefix_data);
-
-	if (!sort_global_prefix.is_valid()) {
-		UtilityFunctions::push_error("ComputeParticleSystem: Failed to create global prefix buffer");
 		return false;
 	}
 
@@ -555,19 +544,11 @@ bool ComputeParticleSystem::_setup_sort_uniform_set() {
 	uniform_histogram->add_id(sort_histogram);
 	uniforms.append(uniform_histogram);
 
-	// Binding 6: global_prefix
-	Ref<RDUniform> uniform_prefix;
-	uniform_prefix.instantiate();
-	uniform_prefix->set_uniform_type(RenderingDevice::UNIFORM_TYPE_STORAGE_BUFFER);
-	uniform_prefix->set_binding(6);
-	uniform_prefix->add_id(sort_global_prefix);
-	uniforms.append(uniform_prefix);
-
-	// Binding 7: sorted_indices_tex (image)
+	// Binding 6: sorted_indices_tex (image)
 	Ref<RDUniform> uniform_sorted_tex;
 	uniform_sorted_tex.instantiate();
 	uniform_sorted_tex->set_uniform_type(RenderingDevice::UNIFORM_TYPE_IMAGE);
-	uniform_sorted_tex->set_binding(7);
+	uniform_sorted_tex->set_binding(6);
 	uniform_sorted_tex->add_id(sorted_indices_tex);
 	uniforms.append(uniform_sorted_tex);
 
@@ -1470,63 +1451,56 @@ void ComputeParticleSystem::_run_particle_sort() {
 		}
 	}
 
-	int num_workgroups = (MAX_PARTICLES + SORT_WORKGROUP_SIZE - 1) / SORT_WORKGROUP_SIZE;
+	// depth_workgroups: one thread per particle for modes 0 and 4
+	int depth_workgroups = (MAX_PARTICLES + SORT_WORKGROUP_SIZE - 1) / SORT_WORKGROUP_SIZE;
 
-	// MODE 0: Compute depth keys and initialize indices
 	PackedFloat32Array push_constants;
 	push_constants.resize(12);
-	push_constants[0] = camera_pos.x;
-	push_constants[1] = camera_pos.y;
-	push_constants[2] = camera_pos.z;
-	push_constants[3] = 0.0f;  // padding
-	push_constants[4] = (float)MAX_PARTICLES;  // particle_count
-	push_constants[5] = (float)PARTICLE_TEX_WIDTH;  // tex_width
-	push_constants[6] = (float)PARTICLE_TEX_HEIGHT;  // tex_height
-	push_constants[7] = 0.0f;  // pass_number
-	push_constants[8] = 0.0f;  // mode = compute_depth
-	push_constants[9] = (float)num_workgroups;  // workgroup_count
-	push_constants[10] = 0.0f;
+	push_constants[0]  = camera_pos.x;
+	push_constants[1]  = camera_pos.y;
+	push_constants[2]  = camera_pos.z;
+	push_constants[3]  = 0.0f;
+	push_constants[4]  = (float)MAX_PARTICLES;
+	push_constants[5]  = (float)PARTICLE_TEX_WIDTH;
+	push_constants[6]  = (float)PARTICLE_TEX_HEIGHT;
+	push_constants[7]  = 0.0f;                      // pass_number
+	push_constants[8]  = 0.0f;                      // mode
+	push_constants[9]  = (float)SORT_NUM_WORKGROUPS; // num_workgroups
+	push_constants[10] = (float)SORT_BLOCKS_PER_WG;  // blocks_per_wg
 	push_constants[11] = 0.0f;
 
-	// Use a single compute list with barriers instead of 14 separate submissions
-	// This significantly reduces GPU sync overhead
 	int64_t compute_list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(compute_list, sort_pipeline);
 	rd->compute_list_bind_uniform_set(compute_list, sort_uniform_set, 0);
 
 	// MODE 0: Compute depth keys and initialize indices
+	push_constants.set(8, 0.0f);
 	rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
-	rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
-	rd->compute_list_add_barrier(compute_list);  // Barrier instead of end
+	rd->compute_list_dispatch(compute_list, depth_workgroups, 1, 1);
+	rd->compute_list_add_barrier(compute_list);
 
-	// Run 4 radix sort passes (8 bits each = 32 bits total)
+	// 4 radix passes: histogram + scatter (scan is inlined into scatter)
 	for (int pass_num = 0; pass_num < 4; pass_num++) {
-		// MODE 1: Build histogram
-		push_constants.set(7, (float)pass_num);  // pass_number
-		push_constants.set(8, 1.0f);  // mode = histogram
+		push_constants.set(7, (float)pass_num);
+
+		// MODE 1: Build per-workgroup histogram
+		push_constants.set(8, 1.0f);
 		rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
-		rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
+		rd->compute_list_dispatch(compute_list, SORT_NUM_WORKGROUPS, 1, 1);
 		rd->compute_list_add_barrier(compute_list);
 
-		// MODE 2: Compute prefix sum
-		push_constants.set(8, 2.0f);  // mode = scan
+		// MODE 3: Inline global scan + scatter
+		push_constants.set(8, 3.0f);
 		rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
-		rd->compute_list_dispatch(compute_list, 1, 1, 1);  // Single workgroup for scan
-		rd->compute_list_add_barrier(compute_list);
-
-		// MODE 3: Scatter to sorted positions
-		push_constants.set(8, 3.0f);  // mode = scatter
-		rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
-		rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
+		rd->compute_list_dispatch(compute_list, SORT_NUM_WORKGROUPS, 1, 1);
 		rd->compute_list_add_barrier(compute_list);
 	}
 
 	// MODE 4: Write sorted indices to texture
-	push_constants.set(8, 4.0f);  // mode = write_texture
+	push_constants.set(8, 4.0f);
 	rd->compute_list_set_push_constant(compute_list, push_constants.to_byte_array(), push_constants.size() * 4);
-	rd->compute_list_dispatch(compute_list, num_workgroups, 1, 1);
+	rd->compute_list_dispatch(compute_list, depth_workgroups, 1, 1);
 
-	// Single submission for all sort operations
 	rd->compute_list_end();
 }
 
@@ -1667,9 +1641,6 @@ void ComputeParticleSystem::_exit_tree() {
 	}
 	if (sort_histogram.is_valid()) {
 		rd->free_rid(sort_histogram);
-	}
-	if (sort_global_prefix.is_valid()) {
-		rd->free_rid(sort_global_prefix);
 	}
 	if (sorted_indices_tex.is_valid()) {
 		rd->free_rid(sorted_indices_tex);
